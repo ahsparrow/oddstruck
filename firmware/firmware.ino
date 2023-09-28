@@ -1,6 +1,7 @@
 #include <M5StickC.h>
-#include <WiFiMulti.h>
+#include <WiFi.h>
 #include <driver/i2s.h>
+#include <MQTT.h>
 
 // GPIO pin for 2SS52M magnetoresistive sensor
 #define MR_SENSOR_PIN (26)
@@ -18,7 +19,8 @@
 #define SSID "cumulus"
 #define PASSWORD "lkjfds11"
 
-WiFiMulti WiFiMulti;
+WiFiClient net;
+MQTTClient mqtt;
 
 // Trigger variables
 int triggered = 0;
@@ -52,19 +54,40 @@ void i2sSetup() {
 
 // Connect to Wifi
 void wifiSetup() {
-  WiFiMulti.addAP(SSID, PASSWORD);
-  M5.lcd.printf("Waiting for WiFi: %s ...", SSID);
+  WiFi.begin(SSID, PASSWORD);
+  M5.lcd.printf("Connecting WiFi: %s...", SSID);
 
-  while (WiFiMulti.run() != WL_CONNECTED) {
-    M5.lcd.print(".");
-    delay(1000);
+  for (int i = 0; i < 8; i++) {
+    if (WiFi.status() == WL_CONNECTED) {
+      M5.lcd.print("\nIP address: ");
+      M5.lcd.println(WiFi.localIP());
+      break;
+    }
+    else {
+      M5.lcd.print(".");
+      delay(500);
+    }
   }
 
-  M5.lcd.println("\nConnected");
-  M5.lcd.print("IP address: ");
-  M5.lcd.println(WiFi.localIP());
+  if (WiFi.status() != WL_CONNECTED) {
+    M5.lcd.println("\nFail");
+  }
 
-  vTaskDelay(500 * portTICK_PERIOD_MS);
+  delay(500);
+}
+
+// Connect to MQTT broker
+void mqttSetup() {
+  M5.lcd.print("Connecting MQTT...");
+  mqtt.begin("192.168.1.100", net);
+
+  while (!mqtt.connect("oddstruct", "", "")) {
+    M5.lcd.print(".");
+    delay(500);
+  }
+  M5.lcd.println("\nOK");
+
+  delay(500);
 }
 
 // Sound detection task
@@ -72,7 +95,12 @@ void mic_task(void *args) {
   char buf[DMA_LENGTH * 4] = {0};
   size_t bytesread;
   int16_t *adc;
+
   unsigned long strike_time;
+  long delay;
+  long old_delay = 0;
+  char str[100];
+
 
   while (1) {
     i2s_read(I2S_NUM_0, buf, DMA_LENGTH * 2, &bytesread, portMAX_DELAY);
@@ -82,11 +110,20 @@ void mic_task(void *args) {
       for (int i = 0; i < DMA_LENGTH; i++) {
         if (abs(adc[i]) > MIC_THRESHOLD) {
           strike_time = micros() - ((DMA_LENGTH - i) * 1000000L / SAMPLE_RATE);
+          delay = (strike_time - trigger_time) / 1000;
 
+          sprintf(str, "%d", delay);
           M5.Lcd.setTextDatum(MC_DATUM);
           M5.Lcd.setTextSize(4);
           M5.Lcd.setTextColor(CYAN);
-          M5.Lcd.drawString(String((strike_time - trigger_time) / 1000).c_str(), 80, 40, 2);
+          M5.Lcd.drawString(str, 80, 40, 2);
+
+          if (mqtt.connected()) {
+            sprintf(str, "{\"delay\": %d, \"delta\": %d}", delay, delay - old_delay);
+            mqtt.publish("/oddstruck", str);
+
+            old_delay = delay;
+          }
 
           triggered = 0;
           break;
@@ -99,7 +136,7 @@ void mic_task(void *args) {
 // Magnetic sensor task
 void sensor_task(void *args) {
    unsigned long start, stop;
-   int timeout = 0;
+   int timeout;
 
   while (1) {
     // Wait for sensor to trigger
@@ -110,6 +147,7 @@ void sensor_task(void *args) {
     M5.Lcd.fillScreen(RED);
 
     // Wait for end of trigger (10ms timeout)
+    timeout = 0;
     while (timeout < 10) {
       if (digitalRead(MR_SENSOR_PIN) == 0) {
         stop = micros();
@@ -139,7 +177,11 @@ void setup() {
   // Bell position sensor
   pinMode(MR_SENSOR_PIN, INPUT);
 
-  //wifiSetup();
+  wifiSetup();
+  if (WiFi.status() == WL_CONNECTED) {
+    mqttSetup();
+  }
+
   i2sSetup();
 
   xTaskCreate(mic_task, "mic_task", 2048, NULL, 1, NULL);
@@ -147,5 +189,7 @@ void setup() {
 }
 
 void loop() {
-  vTaskDelay(portTICK_PERIOD_MS);
+  mqtt.loop();
+
+  vTaskDelay(10 * portTICK_PERIOD_MS);
 }
