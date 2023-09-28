@@ -96,6 +96,40 @@ void mic_task(void *args) {
   }
 }
 
+// Magnetic sensor task
+void sensor_task(void *args) {
+   unsigned long start, stop;
+   int timeout = 0;
+
+  while (1) {
+    // Wait for sensor to trigger
+    while (digitalRead(MR_SENSOR_PIN) == 1) {
+      vTaskDelay(portTICK_PERIOD_MS);
+    }
+    start = micros();
+    M5.Lcd.fillScreen(RED);
+
+    // Wait for end of trigger (10ms timeout)
+    while (timeout < 10) {
+      if (digitalRead(MR_SENSOR_PIN) == 0) {
+        stop = micros();
+        timeout = 0;
+      } else {
+        timeout += 1;
+      }
+
+      vTaskDelay(portTICK_PERIOD_MS);
+    }
+
+    trigger_time = (start + stop) / 2;
+    triggered = 1;
+    M5.Lcd.fillScreen(BLACK);
+
+    // Wait at least a second before triggering again
+    vTaskDelay(1000 * portTICK_PERIOD_MS);
+  }
+}
+
 void setup() {
   M5.begin();
 
@@ -109,54 +143,9 @@ void setup() {
   i2sSetup();
 
   xTaskCreate(mic_task, "mic_task", 2048, NULL, 1, NULL);
+  xTaskCreate(sensor_task, "sensor_task", 2048, NULL, 1, NULL);
 }
 
 void loop() {
-  unsigned long start, stop;
-  int timeout = 0;
-
-  // Wait for sensor to trigger
-  while (digitalRead(MR_SENSOR_PIN) == 1) {
-    vTaskDelay(portTICK_PERIOD_MS);
-  }
-  start = micros();
-  M5.Lcd.fillScreen(RED);
-
-  // Wait for end of trigger (10ms timeout)
-  while (timeout < 10) {
-    if (digitalRead(MR_SENSOR_PIN) == 0) {
-      stop = micros();
-      timeout = 0;
-    } else {
-      timeout += 1;
-    }
-
-    vTaskDelay(portTICK_PERIOD_MS);
-  }
-
-  trigger_time = (start + stop) / 2;
-  triggered = 1;
-  M5.Lcd.fillScreen(BLACK);
-
-  /*
-  M5.Lcd.fillScreen(0);
-  M5.Lcd.setTextDatum(MC_DATUM);
-  M5.Lcd.setTextSize(3);
-  M5.Lcd.drawString(String(stop - start).c_str(), 80, 40, 1);
-  */
-
-  // Wait at least a second before triggering again
-  vTaskDelay(1000 * portTICK_PERIOD_MS);
+  vTaskDelay(portTICK_PERIOD_MS);
 }
-
-/*
-void send_udp(String val) {
-  WiFiUDP udp;
-  udp.begin(5000);
-  udp.beginPacket("192.168.1.112", 5000);
-  udp.write((uint8_t *)val.c_str(), val.length());
-  udp.write((uint8_t *)"\n", 1);
-  udp.endPacket();
-  udp.stop();
-}
-*/
