@@ -22,9 +22,12 @@
 WiFiClient net;
 MQTTClient mqtt;
 
+// Microphone threshold level
+unsigned MicThreshold = MIC_THRESHOLD;
+
 // Trigger variables
-int triggered = 0;
-unsigned long trigger_time;
+int Triggered = 0;
+unsigned long TriggerTime;
 
 // Set up I2S for PDM microphone data
 void i2sSetup() {
@@ -80,18 +83,26 @@ void wifiSetup() {
 void mqttSetup() {
   M5.lcd.print("Connecting MQTT...");
   mqtt.begin("192.168.1.100", net);
+  mqtt.onMessage(mqttReceived);
 
   while (!mqtt.connect("oddstruct", "", "")) {
     M5.lcd.print(".");
     delay(500);
   }
+
+  mqtt.subscribe("/oddstruck/threshold");
   M5.lcd.println("\nOK");
 
   delay(500);
 }
 
+// MQTT receive callback
+void mqttReceived(String &topic, String &received) {
+  MicThreshold = received.toInt();
+}
+
 // Sound detection task
-void mic_task(void *args) {
+void micTask(void *args) {
   char buf[DMA_LENGTH * 4] = {0};
   size_t bytesread;
   int16_t *adc;
@@ -106,13 +117,14 @@ void mic_task(void *args) {
     i2s_read(I2S_NUM_0, buf, DMA_LENGTH * 2, &bytesread, portMAX_DELAY);
     adc = (int16_t *)buf;
 
-    if (triggered) {
+    if (Triggered) {
       for (int i = 0; i < DMA_LENGTH; i++) {
-        if (abs(adc[i]) > MIC_THRESHOLD) {
+        if (abs(adc[i]) > MicThreshold) {
           strike_time = micros() - ((DMA_LENGTH - i) * 1000000L / SAMPLE_RATE);
-          delay = (strike_time - trigger_time) / 1000;
+          delay = (strike_time - TriggerTime) / 1000;
 
           sprintf(str, "%d", delay);
+          M5.Lcd.fillScreen(BLACK);
           M5.Lcd.setTextDatum(MC_DATUM);
           M5.Lcd.setTextSize(4);
           M5.Lcd.setTextColor(CYAN);
@@ -120,12 +132,12 @@ void mic_task(void *args) {
 
           if (mqtt.connected()) {
             sprintf(str, "{\"delay\": %d, \"delta\": %d}", delay, delay - old_delay);
-            mqtt.publish("/oddstruck", str);
+            mqtt.publish("/oddstruck/timing", str);
 
             old_delay = delay;
           }
 
-          triggered = 0;
+          Triggered = 0;
           break;
         }
       }
@@ -134,7 +146,7 @@ void mic_task(void *args) {
 }
 
 // Magnetic sensor task
-void sensor_task(void *args) {
+void sensorTask(void *args) {
    unsigned long start, stop;
    int timeout;
 
@@ -144,7 +156,6 @@ void sensor_task(void *args) {
       vTaskDelay(portTICK_PERIOD_MS);
     }
     start = micros();
-    M5.Lcd.fillScreen(RED);
 
     // Wait for end of trigger (10ms timeout)
     timeout = 0;
@@ -159,9 +170,8 @@ void sensor_task(void *args) {
       vTaskDelay(portTICK_PERIOD_MS);
     }
 
-    trigger_time = (start + stop) / 2;
-    triggered = 1;
-    M5.Lcd.fillScreen(BLACK);
+    TriggerTime = (start + stop) / 2;
+    Triggered = 1;
 
     // Wait at least a second before triggering again
     vTaskDelay(1000 * portTICK_PERIOD_MS);
@@ -184,8 +194,8 @@ void setup() {
 
   i2sSetup();
 
-  xTaskCreate(mic_task, "mic_task", 2048, NULL, 1, NULL);
-  xTaskCreate(sensor_task, "sensor_task", 2048, NULL, 1, NULL);
+  xTaskCreate(micTask, "mic_task", 4096, NULL, 1, NULL);
+  xTaskCreate(sensorTask, "sensor_task", 4096, NULL, 1, NULL);
 }
 
 void loop() {
