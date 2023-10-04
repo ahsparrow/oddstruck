@@ -16,8 +16,8 @@
 #define MIC_THRESHOLD (10000)
 
 // Wifi settings
-#define SSID "cumulus"
-#define PASSWORD "lkjfds11"
+#define SSID "bellringers"
+#define PASSWORD "plainbob"
 
 WiFiClient net;
 MQTTClient mqtt;
@@ -82,7 +82,7 @@ void wifiSetup() {
 // Connect to MQTT broker
 void mqttSetup() {
   M5.lcd.print("Connecting MQTT...");
-  mqtt.begin("192.168.1.100", net);
+  mqtt.begin(WiFi.gatewayIP(), net);
   mqtt.onMessage(mqttReceived);
 
   while (!mqtt.connect("oddstruct", "", "")) {
