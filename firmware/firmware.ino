@@ -62,6 +62,8 @@ void wifiSetup() {
 
   for (int i = 0; i < 8; i++) {
     if (WiFi.status() == WL_CONNECTED) {
+      M5.lcd.print("\nRSSI: ");
+      M5.lcd.print(WiFi.RSSI());
       M5.lcd.print("\nIP address: ");
       M5.lcd.println(WiFi.localIP());
       break;
