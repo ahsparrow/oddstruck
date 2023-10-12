@@ -29,6 +29,9 @@ unsigned MicThreshold = MIC_THRESHOLD;
 int Triggered = 0;
 unsigned long TriggerTime;
 
+// Heartbeat
+int Heartbeat = 0;
+
 // Set up I2S for PDM microphone data
 void i2sSetup() {
   i2s_config_t i2s_config = {
@@ -180,6 +183,21 @@ void sensorTask(void *args) {
   }
 }
 
+// Heartbeat task
+void statusTask(void *args) {
+  char str[100];
+  while (1) {
+    Heartbeat = !Heartbeat;
+
+    if (mqtt.connected()) {
+      sprintf(str, "{\"heartbeat\": %d, \"rssi\": %d}", Heartbeat, WiFi.RSSI());
+      mqtt.publish("/oddstruck/status", str);
+    }
+
+    vTaskDelay(1000* portTICK_PERIOD_MS);
+  }
+}
+
 void setup() {
   M5.begin();
 
@@ -198,6 +216,7 @@ void setup() {
 
   xTaskCreate(micTask, "mic_task", 4096, NULL, 1, NULL);
   xTaskCreate(sensorTask, "sensor_task", 4096, NULL, 1, NULL);
+  xTaskCreate(statusTask, "status_task", 4096, NULL, 1, NULL);
 }
 
 void loop() {
