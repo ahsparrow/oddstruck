@@ -113,19 +113,20 @@ void micTask(void *args) {
   int16_t *adc;
 
   unsigned long strike_time;
+  unsigned long tref;
   long delay;
   long old_delay = 0;
   char str[100];
 
-
   while (1) {
     i2s_read(I2S_NUM_0, buf, DMA_LENGTH * 2, &bytesread, portMAX_DELAY);
+    tref = micros();
     adc = (int16_t *)buf;
 
     if (Triggered) {
       for (int i = 0; i < DMA_LENGTH; i++) {
         if (abs(adc[i]) > MicThreshold) {
-          strike_time = micros() - ((DMA_LENGTH - i) * 1000000L / SAMPLE_RATE);
+          strike_time = tref - (((DMA_LENGTH - i) * 1000000L) / SAMPLE_RATE);
           delay = (strike_time - TriggerTime) / 1000;
 
           sprintf(str, "%d", delay);
